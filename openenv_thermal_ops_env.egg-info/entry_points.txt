@@ -1,0 +1,2 @@
+[console_scripts]
+server = thermal_ops_env.server.app:main

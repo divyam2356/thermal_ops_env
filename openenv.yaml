@@ -1,0 +1,17 @@
+spec_version: 1
+name: thermal_ops_env
+type: space
+runtime: fastapi
+app: server.app:app
+port: 8000
+
+tasks:
+  stable_cooling:
+    description: "Easy: Keep all 3 server racks in [20,25°C] under mild ambient conditions with no hardware failures."
+    difficulty: easy
+  fan_failure:
+    description: "Medium: Manage data-center cooling with 1 broken fan and moderate ambient temperature (24-28°C)."
+    difficulty: medium
+  crisis_management:
+    description: "Hard: Survive a heatwave (28-32°C) with 2 broken fans and high compute loads."
+    difficulty: hard
