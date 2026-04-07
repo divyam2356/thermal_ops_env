@@ -198,7 +198,7 @@ def parse_tool_call(text: str) -> Dict[str, Any]:
 
 
 def sanitize_tool_call(
-    raw_call: Dict[str, Any], observation: Any = None
+    raw_call: Dict[str, Any], num_racks: int
 ) -> Optional[Dict[str, Any]]:
     """Validate and sanitize a tool call against both schema AND current env state.
 
@@ -216,11 +216,6 @@ def sanitize_tool_call(
     if tool_name == "wait":
         return {"tool_name": "wait", "arguments": {}}
 
-    # Extract env state for semantic checks
-    broken_fans: set = set()
-    if observation is not None:
-        broken_fans = set(getattr(observation, "broken_fans", []))
-
     if tool_name == "set_fan_speed":
         rack_id = arguments.get("rack_id")
         rpm = arguments.get("rpm")
@@ -231,16 +226,10 @@ def sanitize_tool_call(
         if not isinstance(rpm, (int, float)):
             return None
 
-        # Bounds check: rack_id must be in [0, NUM_RACKS)
-        if rack_id < 0 or rack_id >= NUM_RACKS:
+        # Bounds check: rack_id must be in [0, num_racks)
+        if rack_id < 0 or rack_id >= num_racks:
             if DEBUG:
-                print(f"[DEBUG] sanitize: rack_id {rack_id} out of range [0, {NUM_RACKS})", flush=True)
-            return None
-
-        # Semantic check: can't adjust a broken fan — env will reject with "Failed"
-        if rack_id in broken_fans:
-            if DEBUG:
-                print(f"[DEBUG] sanitize: fan {rack_id} is broken, rejecting set_fan_speed", flush=True)
+                print(f"[DEBUG] sanitize: rack_id {rack_id} out of range [0, {num_racks})", flush=True)
             return None
 
         return {
@@ -266,9 +255,9 @@ def sanitize_tool_call(
             return None
 
         # Bounds check
-        if src < 0 or src >= NUM_RACKS or dst < 0 or dst >= NUM_RACKS:
+        if src < 0 or src >= num_racks or dst < 0 or dst >= num_racks:
             if DEBUG:
-                print(f"[DEBUG] sanitize: rack IDs {src},{dst} out of range [0, {NUM_RACKS})", flush=True)
+                print(f"[DEBUG] sanitize: rack IDs {src},{dst} out of range [0, {num_racks})", flush=True)
             return None
 
         # Semantic check: src and dst must differ — env rejects src == dst
@@ -463,9 +452,9 @@ def run_episode(
                 if DEBUG:
                     print(f"[DEBUG] LLM error: {exc}", flush=True)
 
-            # Parse the tool call — pass observation for semantic validation
+            # Parse the tool call — pass num_racks for bounds validation
             tool_call = parse_tool_call(response_text)
-            sanitized_call = sanitize_tool_call(tool_call, observation)
+            sanitized_call = sanitize_tool_call(tool_call, num_racks=len(observation.rack_temps))
 
             if sanitized_call is None:
                 sanitized_call = heuristic_action(task_name, observation)
