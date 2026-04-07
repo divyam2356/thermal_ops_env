@@ -200,11 +200,7 @@ def parse_tool_call(text: str) -> Dict[str, Any]:
 def sanitize_tool_call(
     raw_call: Dict[str, Any], num_racks: int
 ) -> Optional[Dict[str, Any]]:
-    """Validate and sanitize a tool call against both schema AND current env state.
-
-    Returns None if the action would be rejected by the environment, so the caller
-    can fall back to heuristic_action() instead of burning a step on a "Failed" response.
-    """
+    """Validate and sanitize a tool call against both schema and current env state."""
     tool_name = raw_call.get("tool_name")
     arguments = raw_call.get("arguments", {})
 
@@ -213,6 +209,9 @@ def sanitize_tool_call(
             print(f"[DEBUG] sanitize: rejected unknown tool {tool_name!r}", flush=True)
         return None
 
+    def valid_rack(x: Any) -> bool:
+        return type(x) is int and 0 <= x < num_racks
+
     if tool_name == "wait":
         return {"tool_name": "wait", "arguments": {}}
 
@@ -220,26 +219,24 @@ def sanitize_tool_call(
         rack_id = arguments.get("rack_id")
         rpm = arguments.get("rpm")
 
-        # Type checks
-        if not isinstance(rack_id, int):
-            return None
-        if not isinstance(rpm, (int, float)):
-            return None
-
-        # Bounds check: rack_id must be in [0, num_racks)
-        if rack_id < 0 or rack_id >= num_racks:
+        if not valid_rack(rack_id):
             if DEBUG:
-                print(f"[DEBUG] sanitize: rack_id {rack_id} out of range [0, {num_racks})", flush=True)
+                print(f"[DEBUG] sanitize: rack_id {rack_id!r} invalid for {num_racks} racks", flush=True)
+            return None
+        if not isinstance(rpm, (int, float)) or isinstance(rpm, bool):
             return None
 
         return {
             "tool_name": "set_fan_speed",
-            "arguments": {"rack_id": rack_id, "rpm": int(max(0, min(5000, rpm)))},
+            "arguments": {
+                "rack_id": rack_id,
+                "rpm": int(max(0, min(5000, rpm))),
+            },
         }
 
     if tool_name == "adjust_chiller":
         temp = arguments.get("chiller_temp")
-        if not isinstance(temp, (int, float)):
+        if not isinstance(temp, (int, float)) or isinstance(temp, bool):
             return None
         return {
             "tool_name": "adjust_chiller",
@@ -250,17 +247,10 @@ def sanitize_tool_call(
         src = arguments.get("source_rack")
         dst = arguments.get("target_rack")
 
-        # Type checks
-        if not isinstance(src, int) or not isinstance(dst, int):
-            return None
-
-        # Bounds check
-        if src < 0 or src >= num_racks or dst < 0 or dst >= num_racks:
+        if not valid_rack(src) or not valid_rack(dst):
             if DEBUG:
-                print(f"[DEBUG] sanitize: rack IDs {src},{dst} out of range [0, {num_racks})", flush=True)
+                print(f"[DEBUG] sanitize: rack IDs {src!r},{dst!r} invalid for {num_racks} racks", flush=True)
             return None
-
-        # Semantic check: src and dst must differ — env rejects src == dst
         if src == dst:
             if DEBUG:
                 print(f"[DEBUG] sanitize: src == dst == {src}, rejecting migrate", flush=True)
@@ -291,24 +281,29 @@ def needs_intervention(observation: Any) -> bool:
 
 
 def heuristic_action(task_name: str, observation: Any) -> Dict[str, Any]:
-    """Generate a safe fallback action that is GUARANTEED to be accepted by the env.
+    """Generate a safe fallback action using only valid indices from the observation."""
+    rack_temps = list(getattr(observation, "rack_temps", []))
+    power_loads = list(getattr(observation, "power_loads", []))
+    fan_rpms = list(getattr(observation, "fan_rpms", []))
+    broken_fans = set(getattr(observation, "broken_fans", []))
+    chiller_setpoint = float(getattr(observation, "chiller_setpoint", 16.0))
 
-    Every action returned by this function has been pre-validated against the
-    current observation state — no broken-fan adjustments, no out-of-bounds rack IDs,
-    no src==dst migrations.
-    """
-    rack_temps = list(observation.rack_temps)
-    power_loads = list(observation.power_loads)
-    fan_rpms = list(observation.fan_rpms)
-    broken_fans = set(observation.broken_fans)
-    chiller_setpoint = float(observation.chiller_setpoint)
+    n = min(len(rack_temps), len(power_loads), len(fan_rpms))
+    if n <= 0:
+        return {"tool_name": "wait", "arguments": {}}
 
-    # Identify working (non-broken) racks
-    working_racks = [i for i in range(NUM_RACKS) if i not in broken_fans]
+    rack_temps = rack_temps[:n]
+    power_loads = power_loads[:n]
+    fan_rpms = fan_rpms[:n]
+    broken_fans = {i for i in broken_fans if type(i) is int and 0 <= i < n}
 
-    # Sort racks by temperature for smart targeting
-    hottest_idx = max(range(len(rack_temps)), key=lambda i: rack_temps[i])
-    coolest_working = min(working_racks, key=lambda i: rack_temps[i]) if working_racks else None
+    working_racks = [i for i in range(n) if i not in broken_fans]
+    hottest_idx = max(range(n), key=lambda i: rack_temps[i])
+    coolest_working = (
+        min(working_racks, key=lambda i: (rack_temps[i], power_loads[i]))
+        if working_racks
+        else None
+    )
 
     target_chiller = {
         "stable_cooling": 18.0,
@@ -316,21 +311,25 @@ def heuristic_action(task_name: str, observation: Any) -> Dict[str, Any]:
         "crisis_management": 12.0,
     }.get(task_name, 16.0)
 
-    # Priority 1: Drop chiller if any rack is dangerously hot
     if max(rack_temps) > 24.0 and chiller_setpoint > target_chiller:
         return {
             "tool_name": "adjust_chiller",
             "arguments": {"chiller_temp": target_chiller},
         }
 
-    # Priority 2: Migrate load OFF broken hot racks to coolest working rack
-    if hottest_idx in broken_fans and coolest_working is not None and hottest_idx != coolest_working:
+    if (
+        hottest_idx in broken_fans
+        and coolest_working is not None
+        and hottest_idx != coolest_working
+    ):
         return {
             "tool_name": "migrate_workload",
-            "arguments": {"source_rack": hottest_idx, "target_rack": coolest_working},
+            "arguments": {
+                "source_rack": hottest_idx,
+                "target_rack": coolest_working,
+            },
         }
 
-    # Priority 3: Spin up fans on hot WORKING racks (never touch broken fans)
     for idx in sorted(working_racks, key=lambda i: rack_temps[i], reverse=True):
         if rack_temps[idx] > IDEAL_TEMP + 1.0 and fan_rpms[idx] < 3200:
             return {
@@ -338,25 +337,19 @@ def heuristic_action(task_name: str, observation: Any) -> Dict[str, Any]:
                 "arguments": {"rack_id": idx, "rpm": 3200},
             }
 
-    # Priority 4: Migrate load off heavily-loaded broken racks
-    if broken_fans:
-        loaded_broken = [i for i in broken_fans if 0 <= i < len(power_loads) and power_loads[i] > 2.0]
-        if loaded_broken and working_racks:
-            src = max(loaded_broken, key=lambda i: power_loads[i])
-            # Pick the coolest, least-loaded WORKING rack as dst
-            dst = min(
-                [i for i in working_racks if i != src],
-                key=lambda i: (power_loads[i], rack_temps[i]),
-                default=None,
-            )
-            if dst is not None and src != dst:
-                return {
-                    "tool_name": "migrate_workload",
-                    "arguments": {"source_rack": src, "target_rack": dst},
-                }
+    loaded_broken = [i for i in broken_fans if power_loads[i] > 2.0]
+    if loaded_broken and working_racks:
+        src = max(loaded_broken, key=lambda i: power_loads[i])
+        dst_candidates = [i for i in working_racks if i != src]
+        if dst_candidates:
+            dst = min(dst_candidates, key=lambda i: (power_loads[i], rack_temps[i]))
+            return {
+                "tool_name": "migrate_workload",
+                "arguments": {"source_rack": src, "target_rack": dst},
+            }
 
-    # Fallback: wait is always safe
     return {"tool_name": "wait", "arguments": {}}
+
 
 
 def compute_wait_energy(observation: Any) -> float:
@@ -365,12 +358,14 @@ def compute_wait_energy(observation: Any) -> float:
     )
     energy_consumed = 0.5 * (chiller_delta**2)
 
-    broken_fans = set(observation.broken_fans)
-    for i in range(NUM_RACKS):
-        rpm = observation.fan_rpms[i] if i not in broken_fans else 0
+    fan_rpms = list(getattr(observation, "fan_rpms", []))
+    broken_fans = set(getattr(observation, "broken_fans", []))
+    for i in range(len(fan_rpms)):
+        rpm = fan_rpms[i] if i not in broken_fans else 0
         energy_consumed += ((rpm / 1000.0) ** 3) * 0.2
 
     return energy_consumed
+
 
 
 def compute_grade(
@@ -432,11 +427,9 @@ def run_episode(
             if result.done:
                 break
 
-            # Build the user message from the observation
             user_msg = observation.text_observation
             messages.append({"role": "user", "content": user_msg})
 
-            # Call the LLM
             try:
                 completion = client.chat.completions.create(
                     model=MODEL_NAME,
@@ -452,29 +445,35 @@ def run_episode(
                 if DEBUG:
                     print(f"[DEBUG] LLM error: {exc}", flush=True)
 
-            # Parse the tool call — pass num_racks for bounds validation
             tool_call = parse_tool_call(response_text)
-            sanitized_call = sanitize_tool_call(tool_call, num_racks=len(observation.rack_temps))
+            num_racks = len(getattr(observation, "rack_temps", []))
+            sanitized_call = sanitize_tool_call(tool_call, num_racks=num_racks)
 
             if sanitized_call is None:
-                sanitized_call = heuristic_action(task_name, observation)
+                fallback_call = heuristic_action(task_name, observation)
+                sanitized_call = sanitize_tool_call(fallback_call, num_racks=num_racks)
 
             if (
-                sanitized_call["tool_name"] == "wait"
+                sanitized_call is not None
+                and sanitized_call["tool_name"] == "wait"
                 and consecutive_waits >= 2
                 and needs_intervention(observation)
             ):
-                sanitized_call = heuristic_action(task_name, observation)
+                fallback_call = heuristic_action(task_name, observation)
+                sanitized_call = sanitize_tool_call(fallback_call, num_racks=num_racks)
 
             if consecutive_failed_actions >= 1 and needs_intervention(observation):
-                sanitized_call = heuristic_action(task_name, observation)
+                fallback_call = heuristic_action(task_name, observation)
+                sanitized_call = sanitize_tool_call(fallback_call, num_racks=num_racks)
+
+            if sanitized_call is None:
+                sanitized_call = {"tool_name": "wait", "arguments": {}}
 
             action = ThermalOpsAction(
                 tool_name=sanitized_call.get("tool_name", "wait"),
                 arguments=sanitized_call.get("arguments", {}),
             )
 
-            # Step the environment
             pre_step_observation = observation
             result = env.step(action)
             observation = result.observation
@@ -487,19 +486,23 @@ def run_episode(
                 if all(t <= SAFE_TEMP_MAX for t in observation.rack_temps):
                     steps_all_safe += 1
 
-            # ── CRITICAL: Clamp every reward to strictly (0, 1) ──
             reward = clamp_score(raw_reward)
-
             rewards.append(reward)
             steps_taken = agent_step
 
             action_str = f"{action.tool_name}({json.dumps(action.arguments)})"
+            status_message = getattr(observation, "status_message", "") or ""
+            status_lower = status_message.lower()
+
             error = None
             if (
-                "Failed" in observation.status_message
-                or "Unknown" in observation.status_message
+                "failed" in status_lower
+                or "unknown" in status_lower
+                or "out of range" in status_lower
+                or "range" in status_lower
+                or "invalid" in status_lower
             ):
-                error = observation.status_message
+                error = status_message
                 consecutive_failed_actions += 1
             else:
                 consecutive_failed_actions = 0
@@ -536,13 +539,10 @@ def run_episode(
             success = False
 
     finally:
-        # Final safety clamp before emitting the score
         grade = clamp_score(float(grade or 0.01))
-
-        # Also clamp each reward in the list one more time for safety
         rewards = [clamp_score(r) for r in rewards]
-
         log_end(success=success, grade=grade, steps=steps_taken, rewards=rewards)
+
 
 
 # ── Main ───────────────────────────────────────────────────────────────────
