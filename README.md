@@ -1,3 +1,14 @@
+---
+title: Thermal Ops Environment
+emoji: 🌡️
+colorFrom: blue
+colorTo: red
+sdk: docker
+app_port: 8000
+tags:
+  - openenv
+---
+
 # Thermal Ops - Data Center Cooling Simulation
 
 An OpenEnv-compliant RL environment that simulates **data-center thermal management**.
