@@ -340,7 +340,7 @@ def compute_grade(
     }
     w_temp, w_energy, w_stab = weights.get(task_name, (0.50, 0.30, 0.20))
     grade = w_temp * temp_score + w_energy * energy_score + w_stab * stability_score
-    return round(max(0.0, min(1.0, grade)), 4)
+    return round(max(0.001, min(0.999, grade)), 4)
 
 
 # ── Episode runner ─────────────────────────────────────────────────────────
@@ -351,7 +351,7 @@ def run_episode(client: OpenAI, env: ThermalOpsEnv, task_name: str) -> None:
     rewards: List[float] = []
     steps_taken = 0
     success = False
-    grade = 0.0
+    grade = 0.001
     total_energy = 0.0
     steps_all_safe = 0
     wait_steps = 0
@@ -464,7 +464,7 @@ def run_episode(client: OpenAI, env: ThermalOpsEnv, task_name: str) -> None:
                         wait_steps=wait_steps,
                         rack_temps=list(observation.rack_temps),
                     )
-                grade = float(grade or 0.0)
+                grade = float(grade or 0.001)
                 success = grade > 0.3
                 break
         else:

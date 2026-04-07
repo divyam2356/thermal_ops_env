@@ -369,4 +369,4 @@ class ThermalOpsEnvironment(Environment):
 
         grade = w_temp * temp_score + w_energy * energy_score + w_stab * stability_score
         # Clamp to strictly (0, 1) — validator rejects exact 0.0 and 1.0
-        return round(max(1, min(0, grade)), 4)
+        return round(max(0.001, min(0.999, grade)), 4)
