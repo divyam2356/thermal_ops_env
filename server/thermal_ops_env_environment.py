@@ -306,6 +306,9 @@ class ThermalOpsEnvironment(Environment):
         if self._done:
             grade = self._compute_grade()
 
+        # When episode ends, use grade as reward (validator reads reward as task score)
+        final_reward = grade if self._done else step_reward
+
         return ThermalOpsObservation(
             ambient_temp=round(self.ambient_temp, 2),
             rack_temps=rounded_temps,
@@ -318,7 +321,7 @@ class ThermalOpsEnvironment(Environment):
             status_message=status,
             text_observation=text_obs,
             done=self._done,
-            reward=step_reward,
+            reward=final_reward,
             grade=grade,
             metadata={
                 "task": self._task_name,
@@ -368,5 +371,5 @@ class ThermalOpsEnvironment(Environment):
         w_temp, w_energy, w_stab = weights.get(self._task_name, (0.50, 0.30, 0.20))
 
         grade = w_temp * temp_score + w_energy * energy_score + w_stab * stability_score
-        # Clamp to strictly (0, 1) — validator rejects exact 0.0 and 1.0
-        return round(max(0.001, min(0.999, grade)), 4)
+        # Clamp to strictly (0, 1) and round to 2 decimal places as validator expects
+        return round(max(0.01, min(0.99, grade)), 2)

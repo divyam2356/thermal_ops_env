@@ -85,5 +85,5 @@ class ThermalOpsObservation(Observation):
     )
     grade: Optional[float] = Field(
         default=None,
-        description="Final episode grade in [0.0, 1.0]; populated when the episode ends.",
+        description="Final episode grade in (0.0, 1.0) with 2 decimal precision; populated when the episode ends.",
     )

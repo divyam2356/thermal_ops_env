@@ -48,6 +48,7 @@ TASK_SEEDS: Dict[str, int] = {
     "fan_failure": 2202,
     "crisis_management": 3303,
 }
+EPISODES_PER_TASK = 3  # validator requires 3+ episodes per task
 MAX_AGENT_STEPS = 25  # max tool calls per episode (wait advances sim)
 TEMPERATURE = float(os.getenv("AGENT_TEMPERATURE", "0.0"))
 MAX_TOKENS = 256
@@ -115,8 +116,7 @@ Respond with ONLY a JSON object. No text or markdown tags outside the braces.
 # ── Logging helpers ────────────────────────────────────────────────────────
 
 
-def log_start(task: str, env: str, model: str) -> None:
-    seed = TASK_SEEDS.get(task, 0)
+def log_start(task: str, env: str, model: str, seed: int = 0) -> None:
     print(f"[START] task={task} env={env} model={model} seed={seed}", flush=True)
 
 
@@ -340,26 +340,31 @@ def compute_grade(
     }
     w_temp, w_energy, w_stab = weights.get(task_name, (0.50, 0.30, 0.20))
     grade = w_temp * temp_score + w_energy * energy_score + w_stab * stability_score
-    return round(max(0.001, min(0.999, grade)), 4)
+    return round(max(0.01, min(0.99, grade)), 2)
 
 
 # ── Episode runner ─────────────────────────────────────────────────────────
 
 
-def run_episode(client: OpenAI, env: ThermalOpsEnv, task_name: str) -> None:
+def run_episode(
+    client: OpenAI, env: ThermalOpsEnv, task_name: str, seed: Optional[int] = None
+) -> None:
     """Run one episode of the given task."""
     rewards: List[float] = []
     steps_taken = 0
     success = False
-    grade = 0.001
+    grade = 0.01
     total_energy = 0.0
     steps_all_safe = 0
     wait_steps = 0
 
-    log_start(task=task_name, env="thermal_ops", model=MODEL_NAME)
+    if seed is None:
+        seed = TASK_SEEDS.get(task_name, 0)
+
+    log_start(task=task_name, env="thermal_ops", model=MODEL_NAME, seed=seed)
 
     try:
-        result = env.reset(task_name=task_name, seed=TASK_SEEDS.get(task_name, 0))
+        result = env.reset(task_name=task_name, seed=seed)
         observation = result.observation
         consecutive_waits = 0
         consecutive_failed_actions = 0
@@ -464,7 +469,7 @@ def run_episode(client: OpenAI, env: ThermalOpsEnv, task_name: str) -> None:
                         wait_steps=wait_steps,
                         rack_temps=list(observation.rack_temps),
                     )
-                grade = float(grade or 0.001)
+                grade = float(grade or 0.01)
                 success = grade > 0.3
                 break
         else:
@@ -494,8 +499,12 @@ def main() -> None:
 
     with env:
         for task_name in TASKS:
-            run_episode(llm_client, env, task_name)
-            print("", flush=True)  # blank line between episodes
+            for episode_idx in range(EPISODES_PER_TASK):
+                # Use different seed for each episode
+                base_seed = TASK_SEEDS.get(task_name, 0)
+                episode_seed = base_seed + episode_idx * 1000
+                run_episode(llm_client, env, task_name, seed=episode_seed)
+                print("", flush=True)  # blank line between episodes
 
 
 if __name__ == "__main__":
