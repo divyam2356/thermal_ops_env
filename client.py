@@ -51,20 +51,29 @@ class ThermalOpsEnv(
             "arguments": action.arguments,
         }
 
+    @staticmethod
+    def _clamp(value: float) -> float:
+        """Clamp to strictly (0, 1) — never 0.0 or 1.0."""
+        if value <= 0.0:
+            return 0.01
+        if value >= 1.0:
+            return 0.99
+        return value
+
     def _parse_result(self, payload: Dict) -> StepResult[ThermalOpsObservation]:
         """Parse server response into StepResult[ThermalOpsObservation]."""
         obs_data = payload.get("observation", {})
         done = payload.get("done", False)
         raw_reward = payload.get("reward")
 
-        # Clamp reward/grade strictly into (0, 1) when episode ends
-        if done and raw_reward is not None:
-            raw_reward = max(0.01, min(0.99, float(raw_reward)))
+        # CRITICAL: Clamp ALL rewards strictly into (0, 1) — not just final
+        if raw_reward is not None:
+            raw_reward = self._clamp(float(raw_reward))
 
         # Propagate the grade field from the server observation
         grade = obs_data.get("grade")
         if grade is not None:
-            grade = max(0.01, min(0.99, float(grade)))
+            grade = self._clamp(float(grade))
 
         observation = ThermalOpsObservation(
             ambient_temp=obs_data.get("ambient_temp", 0.0),

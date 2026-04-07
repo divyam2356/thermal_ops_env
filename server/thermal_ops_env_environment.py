@@ -26,6 +26,15 @@ from uuid import uuid4
 from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.types import State
 
+
+def _clamp_score(value: float) -> float:
+    """Clamp a value strictly into (0, 1) — never 0.0 or 1.0."""
+    if value <= 0.0:
+        return 0.01
+    elif value >= 1.0:
+        return 0.99
+    return value
+
 try:
     from ..models import ThermalOpsAction, ThermalOpsObservation
 except ImportError:
@@ -304,12 +313,12 @@ class ThermalOpsEnvironment(Environment):
         # Compute final grade when episode ends
         grade = None
         if self._done:
-            grade = self._compute_grade()
-            # Belt-and-suspenders: ensure grade is strictly in (0, 1)
-            grade = max(0.01, min(0.99, grade))
+            grade = _clamp_score(self._compute_grade())
 
-        # When episode ends, use grade as reward (validator reads reward as task score)
-        final_reward = grade if self._done else step_reward
+        # CRITICAL: Clamp ALL rewards to strictly (0, 1) for the validator.
+        # The validator checks every reward/score, not just the final grade.
+        clamped_step_reward = _clamp_score(step_reward)
+        final_reward = grade if self._done else clamped_step_reward
 
         return ThermalOpsObservation(
             ambient_temp=round(self.ambient_temp, 2),
@@ -373,4 +382,4 @@ class ThermalOpsEnvironment(Environment):
         w_temp, w_energy, w_stab = weights.get(self._task_name, (0.50, 0.30, 0.20))
 
         grade = w_temp * temp_score + w_energy * energy_score + w_stab * stability_score
-        return max(0.01, min(0.99, grade))
+        return _clamp_score(grade)
