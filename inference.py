@@ -340,7 +340,7 @@ def compute_grade(
     }
     w_temp, w_energy, w_stab = weights.get(task_name, (0.50, 0.30, 0.20))
     grade = w_temp * temp_score + w_energy * energy_score + w_stab * stability_score
-    return round(max(0.00, min(1.00, grade)), 2)
+    return round(max(0.01, min(0.99, grade)), 2)
 
 
 # ── Episode runner ─────────────────────────────────────────────────────────
