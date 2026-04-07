@@ -340,7 +340,7 @@ def compute_grade(
     }
     w_temp, w_energy, w_stab = weights.get(task_name, (0.50, 0.30, 0.20))
     grade = w_temp * temp_score + w_energy * energy_score + w_stab * stability_score
-    return round(max(0.01, min(0.99, grade)), 2)
+    return round(max(0.00, min(1.00, grade)), 2)
 
 
 # ── Episode runner ─────────────────────────────────────────────────────────
@@ -353,7 +353,7 @@ def run_episode(
     rewards: List[float] = []
     steps_taken = 0
     success = False
-    grade = 0.01
+    grade = 0.00
     total_energy = 0.0
     steps_all_safe = 0
     wait_steps = 0
@@ -460,7 +460,7 @@ def run_episode(
             if done:
                 grade = observation.grade
                 if grade is None and observation.metadata:
-                    grade = observation.metadata.get("grade", 0.0)
+                    grade = observation.metadata.get("grade", 0.00)
                 if grade is None:
                     grade = compute_grade(
                         task_name=task_name,
@@ -469,7 +469,7 @@ def run_episode(
                         wait_steps=wait_steps,
                         rack_temps=list(observation.rack_temps),
                     )
-                grade = float(grade or 0.01)
+                grade = float(grade or 0.00)
                 success = grade > 0.3
                 break
         else:
