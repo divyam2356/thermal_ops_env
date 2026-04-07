@@ -368,4 +368,5 @@ class ThermalOpsEnvironment(Environment):
         w_temp, w_energy, w_stab = weights.get(self._task_name, (0.50, 0.30, 0.20))
 
         grade = w_temp * temp_score + w_energy * energy_score + w_stab * stability_score
-        return round(max(0.0, min(1.0, grade)), 4)
+        # Clamp to strictly (0, 1) — validator rejects exact 0.0 and 1.0
+        return round(max(0.0001, min(0.9999, grade)), 4)
