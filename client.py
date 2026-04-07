@@ -54,6 +54,18 @@ class ThermalOpsEnv(
     def _parse_result(self, payload: Dict) -> StepResult[ThermalOpsObservation]:
         """Parse server response into StepResult[ThermalOpsObservation]."""
         obs_data = payload.get("observation", {})
+        done = payload.get("done", False)
+        raw_reward = payload.get("reward")
+
+        # Clamp reward/grade strictly into (0, 1) when episode ends
+        if done and raw_reward is not None:
+            raw_reward = max(0.01, min(0.99, float(raw_reward)))
+
+        # Propagate the grade field from the server observation
+        grade = obs_data.get("grade")
+        if grade is not None:
+            grade = max(0.01, min(0.99, float(grade)))
+
         observation = ThermalOpsObservation(
             ambient_temp=obs_data.get("ambient_temp", 0.0),
             rack_temps=obs_data.get("rack_temps", []),
@@ -65,15 +77,16 @@ class ThermalOpsEnv(
             max_steps=obs_data.get("max_steps", 10),
             status_message=obs_data.get("status_message", ""),
             text_observation=obs_data.get("text_observation", ""),
-            done=payload.get("done", False),
-            reward=payload.get("reward"),
+            done=done,
+            reward=raw_reward,
+            grade=grade,
             metadata=obs_data.get("metadata", {}),
         )
 
         return StepResult(
             observation=observation,
-            reward=payload.get("reward"),
-            done=payload.get("done", False),
+            reward=raw_reward,
+            done=done,
         )
 
     def _parse_state(self, payload: Dict) -> State:
