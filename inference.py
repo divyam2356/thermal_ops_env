@@ -31,13 +31,14 @@ from thermal_ops_env.models import ThermalOpsAction
 
 # ── Configuration ──────────────────────────────────────────────────────────
 
-load_dotenv(Path(__file__).with_name(".env"))
+# Load .env but NEVER override system env vars (validator sets API_BASE_URL/API_KEY)
+load_dotenv(Path(__file__).with_name(".env"), override=False)
 
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
 API_KEY = (
-    (os.getenv("HF_TOKEN") or "").strip()
+    (os.getenv("API_KEY") or "").strip()
     or (os.getenv("OPENAI_API_KEY") or "").strip()
-    or (os.getenv("API_KEY") or "").strip()
+    or (os.getenv("HF_TOKEN") or "").strip()
 )
 MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
 DOCKER_IMAGE = os.getenv("DOCKER_IMAGE") or "thermal_ops_env-env:latest"
