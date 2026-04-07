@@ -305,6 +305,8 @@ class ThermalOpsEnvironment(Environment):
         grade = None
         if self._done:
             grade = self._compute_grade()
+            # Belt-and-suspenders: ensure grade is strictly in (0, 1)
+            grade = max(0.01, min(0.99, grade))
 
         # When episode ends, use grade as reward (validator reads reward as task score)
         final_reward = grade if self._done else step_reward

@@ -353,7 +353,7 @@ def run_episode(
     rewards: List[float] = []
     steps_taken = 0
     success = False
-    grade = 0.00
+    grade = 0.01
     total_energy = 0.0
     steps_all_safe = 0
     wait_steps = 0
@@ -460,7 +460,7 @@ def run_episode(
             if done:
                 grade = observation.grade
                 if grade is None and observation.metadata:
-                    grade = observation.metadata.get("grade", 0.00)
+                    grade = observation.metadata.get("grade", 0.01)
                 if grade is None:
                     grade = compute_grade(
                         task_name=task_name,
@@ -469,13 +469,17 @@ def run_episode(
                         wait_steps=wait_steps,
                         rack_temps=list(observation.rack_temps),
                     )
-                grade = float(grade or 0.00)
+                grade = float(grade or 0.01)
+                # Ensure grade is strictly in (0, 1)
+                grade = max(0.01, min(0.99, grade))
                 success = grade > 0.3
                 break
         else:
             success = False
 
     finally:
+        # Final safety clamp before emitting the score
+        grade = max(0.01, min(0.99, float(grade or 0.01)))
         log_end(success=success, grade=grade, steps=steps_taken, rewards=rewards)
 
 
