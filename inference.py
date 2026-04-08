@@ -129,24 +129,26 @@ Respond with ONLY a JSON object. No text or markdown tags outside the braces.
 # ── Logging helpers ────────────────────────────────────────────────────────
 
 
-def log_start(task: str, env: str, model: str, seed: int = 0) -> None:
-    print(f"[START] task={task} env={env} model={model} seed={seed}", flush=True)
+def log_start(task: str, env: str, model: str) -> None:
+    print(f"[START] task={task} env={env} model={model}", flush=True)
 
 
 def log_step(
     step: int, action: str, reward: float, done: bool, error: Optional[str]
 ) -> None:
     err = error if error else "null"
+    done_val = str(done).lower()
+    clean_action = action.replace("\n", " ").replace("\r", " ")
     print(
-        f"[STEP] step={step} action={action} reward={reward:.2f} done={str(done).lower()} error={err}",
+        f"[STEP] step={step} action={clean_action} reward={reward:.2f} done={done_val} error={err}",
         flush=True,
     )
 
 
-def log_end(success: bool, grade: float, steps: int, rewards: List[float]) -> None:
+def log_end(success: bool, score: float, steps: int, rewards: List[float]) -> None:
     rstr = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END] success={str(success).lower()} grade={grade:.4f} steps={steps} rewards={rstr}",
+        f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rstr}",
         flush=True,
     )
 
@@ -413,7 +415,7 @@ def run_episode(
     if seed is None:
         seed = TASK_SEEDS.get(task_name, 0)
 
-    log_start(task=task_name, env="thermal_ops", model=MODEL_NAME, seed=seed)
+    log_start(task=task_name, env="thermal_ops", model=MODEL_NAME)
 
     try:
         result = env.reset(task_name=task_name, seed=seed)
@@ -541,7 +543,7 @@ def run_episode(
     finally:
         grade = clamp_score(float(grade or 0.01))
         rewards = [clamp_score(r) for r in rewards]
-        log_end(success=success, grade=grade, steps=steps_taken, rewards=rewards)
+        log_end(success=success, score=grade, steps=steps_taken, rewards=rewards)
 
 
 
